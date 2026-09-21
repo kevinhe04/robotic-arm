@@ -1,0 +1,45 @@
+# Servo bus layout for the 4-DOF build.
+#
+# `id` is what gets burned into each servo's EEPROM by `servo_tool assign`.
+# Assign them base-outward so the numbering matches the kinematic chain order.
+#
+# Limits and offsets are filled in by joint calibration (build step 3) and are left
+# null until then. Nothing should command motion while they are null.
+#
+# NOTE: nothing reads this file yet. The C++ driver does not parse YAML, and whether
+# it should -- versus a constexpr table for the ids plus a separate runtime file for
+# calibration output -- is still undecided. See CLAUDE.md.
+
+bus:
+  # null = auto-detect when exactly one USB serial adapter is present.
+  port: null
+  baudrate: 1000000
+
+joints:
+  base_pan:
+    id: 1
+    axis: yaw
+    offset_counts: null
+    min_counts: null
+    max_counts: null
+
+  shoulder_lift:
+    id: 2
+    axis: pitch
+    offset_counts: null
+    min_counts: null
+    max_counts: null
+
+  elbow_flex:
+    id: 3
+    axis: pitch
+    offset_counts: null
+    min_counts: null
+    max_counts: null
+
+  wrist_flex:
+    id: 4
+    axis: pitch
+    offset_counts: null
+    min_counts: null
+    max_counts: null
