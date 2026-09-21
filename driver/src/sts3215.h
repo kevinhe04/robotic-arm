@@ -55,6 +55,7 @@ public:
 
     // Two-byte register access. The STS series stores these low byte first.
     bool read_u16(uint8_t id, uint8_t reg, uint16_t* out);
+    bool write_u16(uint8_t id, uint8_t reg, uint16_t value);
 
     // Pings every ID from 0 to 253 and returns the ones that answered.
     std::vector<uint8_t> scan();

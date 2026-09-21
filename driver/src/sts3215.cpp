@@ -148,6 +148,14 @@ bool Bus::read_u16(uint8_t id, uint8_t reg, uint16_t* out) {
     return true;
 }
 
+bool Bus::write_u16(uint8_t id, uint8_t reg, uint16_t value) {
+    std::vector<uint8_t> reply;
+    // Low byte first, matching read_u16.
+    const uint8_t low = static_cast<uint8_t>(value & 0xFF);
+    const uint8_t high = static_cast<uint8_t>((value >> 8) & 0xFF);
+    return transact(id, kInstWrite, {reg, low, high}, &reply, 0);
+}
+
 std::vector<uint8_t> Bus::scan() {
     std::vector<uint8_t> found;
     for (int id = 0; id <= 253; ++id) {

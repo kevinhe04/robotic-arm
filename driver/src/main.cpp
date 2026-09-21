@@ -28,7 +28,16 @@ void print_usage() {
         "  ping <id>            check a single servo\n"
         "  setid <old> <new>    change a servo's ID (one servo on the bus, please)\n"
         "  pos <id>             read the servo's present position (0-4095)\n"
+        "  read <id> <reg> [n]  read register <reg>, n = 1 or 2 bytes (default 1)\n"
+        "  write <id> <reg> <v> [n] [--force]   write <v> to <reg>, n = 1 or 2 bytes\n"
         "  assign [count]       interactive: give `count` servos the IDs 1..count\n"
+        "\n"
+        "registers are decimal or 0x hex. Useful ones:\n"
+        "  40 torque enable (0/1)   55 EEPROM lock (0/1)   62 voltage (0.1V)\n"
+        "  63 temperature (C)       42 goal position (2B)  56 present position (2B)\n"
+        "\n"
+        "writes to registers below 40 are EEPROM (persistent, write-limited) and\n"
+        "need --force. Writing register 6 (baud rate) can make a servo unreachable.\n"
         "\n"
         "example: servo_tool COM5 assign 4\n";
 }
@@ -44,6 +53,23 @@ bool parse_id(const char* text, uint8_t* out) {
     *out = static_cast<uint8_t>(value);
     return true;
 }
+
+// Parses a register address or register value. Accepts decimal or 0x hex.
+bool parse_u8(const char* text, const char* what, uint8_t* out) {
+    char* end = nullptr;
+    const long value = std::strtol(text, &end, 0);
+    if (end == text || *end != '\0' || value < 0 || value > 255) {
+        std::cout << "'" << text << "' is not a valid " << what << " (0-255)\n";
+        return false;
+    }
+    *out = static_cast<uint8_t>(value);
+    return true;
+}
+
+// Registers below this address live in EEPROM: they survive power-off, are
+// write-limited, and include the ID and baud rate. Writing the baud rate by
+// accident makes the servo unreachable, so those writes need --force.
+constexpr uint8_t kFirstSramRegister = 40;
 
 void wait_for_enter(const std::string& prompt) {
     std::cout << prompt << std::flush;
@@ -195,6 +221,100 @@ int main(int argc, char** argv) {
         // The STS3215 reports position as 0-4095 over its 360 degree range.
         std::cout << "servo " << static_cast<int>(id) << " position: " << position << " ("
                   << (position * 360.0 / 4096.0) << " degrees)\n";
+        return 0;
+    }
+
+    if (command == "read") {
+        uint8_t id = 0;
+        uint8_t reg = 0;
+        if (remaining < 2 || !parse_id(argv[arg], &id) ||
+            !parse_u8(argv[arg + 1], "register", &reg)) {
+            print_usage();
+            return 1;
+        }
+
+        int width = 1;
+        if (remaining >= 3) {
+            width = std::atoi(argv[arg + 2]);
+            if (width != 1 && width != 2) {
+                std::cout << "byte count must be 1 or 2\n";
+                return 1;
+            }
+        }
+
+        if (width == 1) {
+            uint8_t value = 0;
+            if (!bus.read_u8(id, reg, &value)) {
+                std::cout << "failed: " << bus.last_error() << "\n";
+                return 1;
+            }
+            std::cout << "servo " << static_cast<int>(id) << " reg " << static_cast<int>(reg)
+                      << " = " << static_cast<int>(value) << "\n";
+        } else {
+            uint16_t value = 0;
+            if (!bus.read_u16(id, reg, &value)) {
+                std::cout << "failed: " << bus.last_error() << "\n";
+                return 1;
+            }
+            std::cout << "servo " << static_cast<int>(id) << " reg " << static_cast<int>(reg)
+                      << " = " << value << "\n";
+        }
+        return 0;
+    }
+
+    if (command == "write") {
+        bool force = false;
+        std::vector<const char*> args;
+        for (int i = arg; i < argc; ++i) {
+            if (std::string(argv[i]) == "--force") {
+                force = true;
+            } else {
+                args.push_back(argv[i]);
+            }
+        }
+
+        uint8_t id = 0;
+        uint8_t reg = 0;
+        if (args.size() < 3 || !parse_id(args[0], &id) || !parse_u8(args[1], "register", &reg)) {
+            print_usage();
+            return 1;
+        }
+
+        int width = 1;
+        if (args.size() >= 4) {
+            width = std::atoi(args[3]);
+            if (width != 1 && width != 2) {
+                std::cout << "byte count must be 1 or 2\n";
+                return 1;
+            }
+        }
+
+        char* end = nullptr;
+        const long raw = std::strtol(args[2], &end, 0);
+        const long limit = (width == 1) ? 255 : 65535;
+        if (end == args[2] || *end != '\0' || raw < 0 || raw > limit) {
+            std::cout << "'" << args[2] << "' is not a valid " << width << "-byte value (0-"
+                      << limit << ")\n";
+            return 1;
+        }
+
+        if (reg < kFirstSramRegister && !force) {
+            std::cout << "register " << static_cast<int>(reg)
+                      << " is EEPROM: the write persists across power cycles, and register 6\n"
+                         "(baud rate) or 5 (ID) can make the servo unreachable. Re-run with\n"
+                         "--force if that is really what you want, or use `setid` to change an ID.\n";
+            return 1;
+        }
+
+        const bool ok = (width == 1)
+                            ? bus.write_u8(id, reg, static_cast<uint8_t>(raw))
+                            : bus.write_u16(id, reg, static_cast<uint16_t>(raw));
+        if (!ok) {
+            std::cout << "failed: " << bus.last_error() << "\n";
+            return 1;
+        }
+        std::cout << "servo " << static_cast<int>(id) << " reg " << static_cast<int>(reg)
+                  << " <- " << raw << "\n";
         return 0;
     }
 

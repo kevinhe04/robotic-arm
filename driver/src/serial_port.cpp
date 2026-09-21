@@ -29,8 +29,11 @@ SerialPort::~SerialPort() { close(); }
 bool SerialPort::open(const std::string& port_name, uint32_t baud_rate) {
     close();
 
-    // COM10 and above need the \.\ prefix; using it for every port is harmless.
-    const std::string path = "\\.\\" + port_name;
+    // COM10 and above need the \\.\ prefix; using it for every port is harmless.
+    // Note the escaping: the device path is \\.\COM6, so the literal needs four
+    // backslashes then a dot then two -- "\\.\\" would build \.\COM6 and fail
+    // with ERROR_FILE_NOT_FOUND.
+    const std::string path = "\\\\.\\" + port_name;
 
     HANDLE handle = CreateFileA(path.c_str(), GENERIC_READ | GENERIC_WRITE,
                                 0,        // no sharing, we want the port to ourselves

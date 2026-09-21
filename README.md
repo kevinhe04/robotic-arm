@@ -3,8 +3,9 @@
 A 4-DOF desktop robot arm that operates a tablet — reading the screen, deciding what to
 press, and pressing it. The demo application is solving Duolingo lessons unassisted.
 
-> **Status:** early. The servo bus driver and ID assignment are written and compile, but
-> no code here has yet talked to a physical servo. See [Roadmap](#roadmap).
+> **Status:** early. Build step 1 is done and verified against real hardware — four servos
+> assigned, chained, and answering. Nothing has moved under power yet. See
+> [Roadmap](#roadmap).
 
 <!-- media/demo.gif goes here once the arm moves -->
 
@@ -94,7 +95,8 @@ or joint angles. `perception/` holds no motion code. The layering is deliberate.
 
 ## Roadmap
 
-- [ ] **1.** Servo bus driver and ID assignment — *written, not yet run on hardware*
+- [x] **1.** Servo bus driver and ID assignment — *verified on hardware: all four IDs
+      assigned, chained bus scans clean, EEPROM re-locks correctly*
 - [ ] **2.** Read/write position and torque; sync-read all four joints
 - [ ] **3.** Joint calibration — zero offsets, direction signs, software limits
 - [ ] **4.** Forward kinematics, then closed-form IK, with round-trip tests
