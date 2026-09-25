@@ -1,10 +1,12 @@
 // main.cpp -- command line tool for setting up STS3215 servos.
 //
-//   servo_tool COM5 scan                list every servo answering on the bus
-//   servo_tool COM5 ping 1              check whether one servo answers
-//   servo_tool COM5 setid 1 3           rename servo 1 to servo 3
-//   servo_tool COM5 pos 3               read a servo's current position
-//   servo_tool COM5 assign 4            walk through giving 4 servos IDs 1..4
+//   servo_tool PORT scan                list every servo answering on the bus
+//   servo_tool PORT ping 1              check whether one servo answers
+//   servo_tool PORT setid 1 3           rename servo 1 to servo 3
+//   servo_tool PORT pos 3               read a servo's current position
+//   servo_tool PORT assign 4            walk through giving 4 servos IDs 1..4
+//
+// PORT is /dev/cu.usbmodem... on macOS (`ls /dev/cu.*`), COM5 etc. on Windows.
 //
 // Add --baud <rate> before the command if a servo is not on the factory
 // 1000000 baud.
@@ -39,7 +41,9 @@ void print_usage() {
         "writes to registers below 40 are EEPROM (persistent, write-limited) and\n"
         "need --force. Writing register 6 (baud rate) can make a servo unreachable.\n"
         "\n"
-        "example: servo_tool COM5 assign 4\n";
+        "PORT is /dev/cu.usbmodem... on macOS (ls /dev/cu.*), COM5 etc. on Windows.\n"
+        "\n"
+        "example: servo_tool /dev/cu.usbmodem1101 assign 4\n";
 }
 
 // Parses a servo ID and complains if it is outside 0-253.

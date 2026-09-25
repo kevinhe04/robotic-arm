@@ -66,8 +66,9 @@ Three things follow, and all three have been got wrong before:
   position writes are desk tasks needing a USB-TTL adapter and a servo — an MCU adds a firmware
   target and a host link for nothing. The question only becomes live at build step 5 (fixed-rate
   control loop), where USB-serial latency is the real argument, and it is optional even then.
-  The cheap hedge is already in place: `windows.h` appears only in `driver/src/serial_port.cpp`,
-  so that option stays open for one file's worth of work. **Keep it that way.**
+  The cheap hedge is already in place: the OS lives only behind `serial_port.h`, with one
+  implementation per platform (`serial_port_posix.cpp`, `serial_port_win32.cpp` — the only file
+  that includes `windows.h`). An MCU would be one more implementation. **Keep it that way.**
 
 ## Writing C++ here
 
@@ -131,10 +132,13 @@ touches the bus:
 driver/         # C++ — the robot
   src/
     sts3215.*     # packet protocol + bus transport
-    serial_port.* # Win32 COM port. The ONLY file that includes windows.h -- keep it so
+    serial_port.h         # serial port interface; the ONLY place the OS leaks in -- keep it so
+    serial_port_posix.cpp # macOS / Linux, termios. 1 Mbaud on macOS needs IOSSIOSPEED
+    serial_port_win32.cpp # Windows. The only file that includes windows.h
     main.cpp      # servo_tool CLI
                   # kinematics, motion, safety, calibration, apps land here
-  CMakeLists.txt, build.bat
+  scripts/        # bench bring-up shell scripts (first_motion.sh, torque_off.sh)
+  CMakeLists.txt, build.sh (macOS), build.bat (Windows)
 perception/     # Python — the VLM call, and nothing else
 configs/        # servos.yaml: ids, limits, calibration output
 hardware/       # BOM, print settings, wiring, deviations from stock SO-101
@@ -151,12 +155,13 @@ yaml-cpp, nlohmann/json, or a hand-rolled parser are all defensible. Ask before 
 ## Commands
 
 ```
-cd driver && cmake -S . -B build && cmake --build build   # or build.bat (MSYS2 g++)
-driver\build\servo_tool.exe COM5 scan
+cd driver && ./build.sh          # Apple clang; or cmake -S . -B build && cmake --build build
+driver/build/servo_tool /dev/cu.usbmodem5B8E1134991 scan
 ```
 
-Toolchain present on this machine: MSYS2 g++ at `C:\msys64\mingw64\bin\g++.exe`, CMake at
-`C:\Program Files\CMake\bin\cmake.exe`. `build.bat` hardcodes the g++ path.
+Development machine is a MacBook: Apple clang 17, **no CMake installed** — use `build.sh`.
+The Waveshare adapter enumerates as `/dev/cu.usbmodem5B8E1134991`. `build.bat` (MSYS2 g++,
+hardcoded path) is kept so the Windows backend still builds, but is not the primary path.
 
 `perception/` has no Python environment yet — no `uv`, no `.venv`, no `pytest`. It also has no
 code in it, so this is not blocking anything.

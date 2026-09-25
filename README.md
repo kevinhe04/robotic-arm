@@ -61,15 +61,15 @@ Wiring, BOM and deviations from stock SO-101 are in [`hardware/`](hardware/READM
 
 ```bash
 cd driver
-cmake -S . -B build && cmake --build build     # or: build.bat  (g++ from MSYS2)
+./build.sh                                     # or: cmake -S . -B build && cmake --build build
 ```
 
 With the arm powered and plugged in — assign IDs one servo at a time, then confirm the
 chain:
 
 ```
-driver\build\servo_tool.exe COM5 assign 4
-driver\build\servo_tool.exe COM5 scan
+build/servo_tool /dev/cu.usbmodem1101 assign 4     # ls /dev/cu.* to find your adapter
+build/servo_tool /dev/cu.usbmodem1101 scan
 ```
 
 Every STS3215 ships as ID 1, so a freshly assembled arm has four servos answering to the
@@ -82,9 +82,12 @@ than one servo is connected, rather than silently reassigning the wrong joint.
 driver/         # C++ — the robot
   src/
     sts3215.*     # packet protocol and bus transport
-    serial_port.* # Win32 COM port; the only file that includes windows.h
+    serial_port.h           # serial port interface
+    serial_port_posix.cpp   # macOS / Linux (termios)
+    serial_port_win32.cpp   # Windows; the only file that includes windows.h
     main.cpp      # servo_tool CLI
-  CMakeLists.txt, build.bat
+  scripts/        # bench bring-up: first_motion.sh, torque_off.sh
+  CMakeLists.txt, build.sh, build.bat
 perception/     # Python — the VLM call, and nothing else
 configs/        # servos.yaml: ids, limits, calibration output
 hardware/       # BOM, print settings, wiring, deviations from stock SO-101
