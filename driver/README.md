@@ -49,21 +49,17 @@ the adapter never sends.
 
 ## Build
 
-On macOS, with the Xcode command line tools' clang:
+CMake builds everything (`brew install cmake` on macOS):
 
 ```
-./build.sh
+cmake -S . -B build          # once: configure
+cmake --build build          # build/servo_tool and build/driver_tests
+ctest --test-dir build       # run the tests
 ```
 
-or with CMake, on any platform:
-
-```
-cmake -S . -B build
-cmake --build build
-```
-
-Either way you get `build/servo_tool`. On Windows, `build.bat` does the same with
-MSYS2 g++ and produces `build\servo_tool.exe`.
+The configure step is needed once; after that CMake re-runs it by itself when
+`CMakeLists.txt` changes, and each build recompiles only the files that changed. The
+same commands work on Windows.
 
 ## Assigning the IDs
 
@@ -156,7 +152,7 @@ so changing an ID is three steps: unlock, write the new ID, lock again.
 ## Tests
 
 ```
-./build.sh test
+cmake --build build && ctest --test-dir build
 ```
 
 No port and no servo needed. `Bus` depends on `Transport`, not on `SerialPort`, so the

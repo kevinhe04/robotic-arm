@@ -153,7 +153,7 @@ driver/         # C++ — the robot
                           # kinematics, motion, safety, calibration, apps land here
   tests/          # doctest unit tests against a fake serial port -- no hardware needed
   third_party/    # doctest.h, vendored single header
-  CMakeLists.txt, build.sh (macOS), build.bat (Windows)
+  CMakeLists.txt  # the build, on every platform
 perception/     # Python — the VLM call, and nothing else
 configs/        # servos.yaml: ids, limits, calibration output
 hardware/       # BOM, print settings, wiring, deviations from stock SO-101
@@ -170,13 +170,14 @@ yaml-cpp, nlohmann/json, or a hand-rolled parser are all defensible. Ask before 
 ## Commands
 
 ```
-cd driver && ./build.sh          # Apple clang; or cmake -S . -B build && cmake --build build
-driver/build/servo_tool scan       # port auto-detected when one USB adapter is plugged in
+cd driver && cmake -S . -B build  # configure, once
+cmake --build build && ctest --test-dir build
+build/servo_tool scan             # port auto-detected when one USB adapter is plugged in
 ```
 
-Development machine is a MacBook: Apple clang 17, **no CMake installed** — use `build.sh`.
-The Waveshare adapter enumerates as `/dev/cu.usbmodem5B8E1134991`. `build.bat` (MSYS2 g++,
-hardcoded path) is kept so the Windows backend still builds, but is not the primary path.
+Development machine is a MacBook: Apple clang 17, CMake 4.4 (Homebrew). `CMakeLists.txt` is the
+only build file -- it replaced the old `build.sh` / `build.bat` scripts. Do not add them back.
+The Waveshare adapter enumerates as `/dev/cu.usbmodem5B8E1134991`.
 
 `perception/` has no Python environment yet — no `uv`, no `.venv`, no `pytest`. It also has no
 code in it, so this is not blocking anything.
@@ -184,7 +185,7 @@ code in it, so this is not blocking anything.
 ## Testing
 
 **Tests exist; the driver hardening they describe is not done yet.** `driver/tests/`, doctest,
-run with `cd driver && ./build.sh test` (or `ctest` after a CMake build). `Bus` talks through the
+run with `ctest --test-dir build` after a CMake build. `Bus` talks through the
 `Transport` interface (`src/transport.h`); `SerialPort` is the real implementation and
 `tests/fake_serial_port.h` is a fake that scripts servo replies, with or without adapter echo.
 
