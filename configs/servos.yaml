@@ -1,17 +1,7 @@
-# Servo bus layout for the 4-DOF build.
-#
-# `id` is what gets burned into each servo's EEPROM by `servo_tool assign`.
-# Assign them base-outward so the numbering matches the kinematic chain order.
-#
-# Limits and offsets are filled in by joint calibration (build step 3) and are left
-# null until then. Nothing should command motion while they are null.
-#
-# NOTE: nothing reads this file yet. The C++ driver does not parse YAML, and whether
-# it should -- versus a constexpr table for the ids plus a separate runtime file for
-# calibration output -- is still undecided. See CLAUDE.md.
+# Not read by anything yet -- see the open config question in CLAUDE.md.
+# Calibration (step 3) fills in the nulls; nothing should move while they are null.
 
 bus:
-  # null = auto-detect when exactly one USB serial adapter is present.
   port: null
   baudrate: 1000000
 

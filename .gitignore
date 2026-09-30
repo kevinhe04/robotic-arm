@@ -18,7 +18,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
-# Calibration output is machine-specific, not source
+# Calibration output and arm recordings are machine-specific, not source
+recording*.txt
 configs/calibration_*.yaml
 
 # Editors

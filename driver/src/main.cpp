@@ -1,15 +1,4 @@
-// main.cpp -- command line tool for setting up STS3215 servos.
-//
-//   servo_tool PORT scan                list every servo answering on the bus
-//   servo_tool PORT ping 1              check whether one servo answers
-//   servo_tool PORT setid 1 3           rename servo 1 to servo 3
-//   servo_tool PORT pos 3               read a servo's current position
-//   servo_tool PORT assign 4            walk through giving 4 servos IDs 1..4
-//
-// PORT is /dev/cu.usbmodem... on macOS (`ls /dev/cu.*`), COM5 etc. on Windows.
-//
-// Add --baud <rate> before the command if a servo is not on the factory
-// 1000000 baud.
+#include "recording.h"
 #include "serial_port.h"
 #include "sts3215.h"
 
@@ -23,7 +12,8 @@ namespace {
 
 void print_usage() {
     std::cout <<
-        "usage: servo_tool <PORT> [--baud N] <command> [args]\n"
+        "usage: servo_tool [PORT] [--baud N] <command> [args]\n"
+        "  PORT is optional when exactly one USB serial adapter is plugged in\n"
         "\n"
         "commands:\n"
         "  scan                 ping every ID from 0 to 253 and list the ones that answer\n"
@@ -33,6 +23,9 @@ void print_usage() {
         "  read <id> <reg> [n]  read register <reg>, n = 1 or 2 bytes (default 1)\n"
         "  write <id> <reg> <v> [n] [--force]   write <v> to <reg>, n = 1 or 2 bytes\n"
         "  assign [count]       interactive: give `count` servos the IDs 1..count\n"
+        "  torque-off           disable torque on joints 1-4 (the arm goes limp: support it)\n"
+        "  record [--seconds N] [--out FILE]   torque off; record the arm as you move it\n"
+        "  replay [--seconds N] [--in FILE] [--reverse] [--yes]   play a recording back\n"
         "\n"
         "registers are decimal or 0x hex. Useful ones:\n"
         "  40 torque enable (0/1)   55 EEPROM lock (0/1)   62 voltage (0.1V)\n"
@@ -41,12 +34,11 @@ void print_usage() {
         "writes to registers below 40 are EEPROM (persistent, write-limited) and\n"
         "need --force. Writing register 6 (baud rate) can make a servo unreachable.\n"
         "\n"
-        "PORT is /dev/cu.usbmodem... on macOS (ls /dev/cu.*), COM5 etc. on Windows.\n"
-        "\n"
-        "example: servo_tool /dev/cu.usbmodem1101 assign 4\n";
+        "examples: servo_tool scan\n"
+        "          servo_tool record --seconds 15\n"
+        "          servo_tool /dev/cu.usbmodem1101 replay --seconds 8\n";
 }
 
-// Parses a servo ID and complains if it is outside 0-253.
 bool parse_id(const char* text, uint8_t* out) {
     char* end = nullptr;
     const long value = std::strtol(text, &end, 10);
@@ -58,7 +50,7 @@ bool parse_id(const char* text, uint8_t* out) {
     return true;
 }
 
-// Parses a register address or register value. Accepts decimal or 0x hex.
+// Register addresses and values accept decimal or 0x hex.
 bool parse_u8(const char* text, const char* what, uint8_t* out) {
     char* end = nullptr;
     const long value = std::strtol(text, &end, 0);
@@ -70,9 +62,8 @@ bool parse_u8(const char* text, const char* what, uint8_t* out) {
     return true;
 }
 
-// Registers below this address live in EEPROM: they survive power-off, are
-// write-limited, and include the ID and baud rate. Writing the baud rate by
-// accident makes the servo unreachable, so those writes need --force.
+// Registers below this are EEPROM: persistent, write-limited, and include the ID and
+// baud rate (a wrong baud rate makes the servo unreachable). Writes need --force.
 constexpr uint8_t kFirstSramRegister = 40;
 
 void wait_for_enter(const std::string& prompt) {
@@ -81,10 +72,7 @@ void wait_for_enter(const std::string& prompt) {
     std::getline(std::cin, ignored);
 }
 
-// Walks the user through one servo at a time. Only one servo may be plugged in
-// at a time: a brand new servo is ID 1, so two of them on the same bus would
-// both answer to the same name and the renaming would hit whichever shouts
-// loudest.
+// One servo at a time: new servos are all ID 1, so two on the bus would both answer.
 int run_assign(sts3215::Bus& bus, int count) {
     std::cout << "\nAssigning IDs 1 to " << count << ".\n"
               << "Plug in exactly ONE servo at a time -- unplug the others.\n";
@@ -131,16 +119,14 @@ int run_assign(sts3215::Bus& bus, int count) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    if (argc < 3) {
-        print_usage();
-        return 1;
+    int arg = 1;
+    std::string requested_port;
+    if (arg < argc && looks_like_port(argv[arg])) {
+        requested_port = argv[arg++];
     }
 
-    const std::string port_name = argv[1];
     uint32_t baud_rate = sts3215::kDefaultBaudRate;
-
-    int arg = 2;
-    if (std::string(argv[arg]) == "--baud") {
+    if (arg < argc && std::string(argv[arg]) == "--baud") {
         if (arg + 1 >= argc) {
             std::cout << "--baud needs a number\n";
             return 1;
@@ -156,12 +142,18 @@ int main(int argc, char** argv) {
     const std::string command = argv[arg++];
     const int remaining = argc - arg;
 
+    if (command == "record" || command == "replay") {
+        const std::vector<std::string> args(argv + arg, argv + argc);
+        return command == "record" ? arm::record_command(requested_port, args)
+                                   : arm::replay_command(requested_port, args);
+    }
+
     SerialPort port;
-    if (!port.open(port_name, baud_rate)) {
+    if (!port.open(requested_port, baud_rate)) {
         std::cout << port.last_error() << "\n";
         return 1;
     }
-    std::cout << "opened " << port_name << " at " << baud_rate << " baud\n";
+    std::cout << "opened " << port.name() << " at " << baud_rate << " baud\n";
 
     sts3215::Bus bus(port);
 
@@ -320,6 +312,20 @@ int main(int argc, char** argv) {
         std::cout << "servo " << static_cast<int>(id) << " reg " << static_cast<int>(reg)
                   << " <- " << raw << "\n";
         return 0;
+    }
+
+    if (command == "torque-off") {
+        // Recovery after `replay` holds. Carries on past a failed joint so the rest let go.
+        bool ok = true;
+        for (uint8_t id = 1; id <= 4; ++id) {
+            if (bus.write_u8(id, sts3215::kRegTorqueEnable, 0)) {
+                std::cout << "servo " << static_cast<int>(id) << " torque off\n";
+            } else {
+                std::cout << "servo " << static_cast<int>(id) << " failed: " << bus.last_error() << "\n";
+                ok = false;
+            }
+        }
+        return ok ? 0 : 1;
     }
 
     if (command == "assign") {

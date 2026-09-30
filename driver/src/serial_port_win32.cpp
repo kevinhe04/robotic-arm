@@ -24,25 +24,30 @@ std::string format_last_win_error(const std::string& prefix) {
 
 }  // namespace
 
+std::vector<std::string> SerialPort::list_adapters() {
+    // Windows has no naming pattern for USB adapters, so this is every COM port present.
+    std::vector<std::string> found;
+    char target[256];
+    for (int n = 1; n <= 255; ++n) {
+        const std::string name = "COM" + std::to_string(n);
+        if (QueryDosDeviceA(name.c_str(), target, sizeof(target)) != 0) found.push_back(name);
+    }
+    return found;
+}
+
 SerialPort::~SerialPort() { close(); }
 
-bool SerialPort::open(const std::string& port_name, uint32_t baud_rate) {
+bool SerialPort::open(const std::string& name, uint32_t baud_rate) {
     close();
+    name_ = name;
+    if (name_.empty() && !choose_adapter(list_adapters(), &name_, &last_error_)) return false;
 
-    // COM10 and above need the \\.\ prefix; using it for every port is harmless.
-    // Note the escaping: the device path is \\.\COM6, so the literal needs four
-    // backslashes then a dot then two -- "\\.\\" would build \.\COM6 and fail
-    // with ERROR_FILE_NOT_FOUND.
-    const std::string path = "\\\\.\\" + port_name;
-
-    HANDLE handle = CreateFileA(path.c_str(), GENERIC_READ | GENERIC_WRITE,
-                                0,        // no sharing, we want the port to ourselves
-                                nullptr,
-                                OPEN_EXISTING,
-                                0,        // synchronous I/O
-                                nullptr);
+    // The \\.\ prefix is required for COM10 and above, and harmless below.
+    const std::string path = "\\\\.\\" + name_;
+    HANDLE handle = CreateFileA(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+                                OPEN_EXISTING, 0, nullptr);
     if (handle == INVALID_HANDLE_VALUE) {
-        last_error_ = format_last_win_error("cannot open " + port_name);
+        last_error_ = format_last_win_error("cannot open " + name_);
         return false;
     }
 
@@ -54,7 +59,7 @@ bool SerialPort::open(const std::string& port_name, uint32_t baud_rate) {
         return false;
     }
 
-    // 1 Mbaud, 8 data bits, no parity, 1 stop bit -- the STS3215 factory setting.
+    // 8N1, no flow control.
     dcb.BaudRate = baud_rate;
     dcb.ByteSize = 8;
     dcb.Parity = NOPARITY;
@@ -75,15 +80,12 @@ bool SerialPort::open(const std::string& port_name, uint32_t baud_rate) {
         return false;
     }
 
-    // A servo that is there answers within about a millisecond, so a read that
-    // stays quiet for 50 ms means nobody is home. Keeping this short matters:
-    // a bus scan pays this timeout once for every ID that does not answer.
+    // A servo that is there answers within about a millisecond, so 50 ms of silence means
+    // nobody is home. Kept short because a bus scan pays it for every missing ID.
     COMMTIMEOUTS timeouts{};
     timeouts.ReadIntervalTimeout = 20;
     timeouts.ReadTotalTimeoutConstant = 50;
-    timeouts.ReadTotalTimeoutMultiplier = 0;
     timeouts.WriteTotalTimeoutConstant = 100;
-    timeouts.WriteTotalTimeoutMultiplier = 0;
     if (!SetCommTimeouts(handle, &timeouts)) {
         last_error_ = format_last_win_error("SetCommTimeouts failed");
         CloseHandle(handle);
@@ -104,10 +106,6 @@ void SerialPort::close() {
 }
 
 bool SerialPort::write(const uint8_t* data, size_t length) {
-    if (!handle_) {
-        last_error_ = "port is not open";
-        return false;
-    }
     DWORD written = 0;
     if (!WriteFile(static_cast<HANDLE>(handle_), data, static_cast<DWORD>(length), &written,
                    nullptr)) {
@@ -122,10 +120,6 @@ bool SerialPort::write(const uint8_t* data, size_t length) {
 }
 
 size_t SerialPort::read(uint8_t* buffer, size_t length) {
-    if (!handle_) {
-        last_error_ = "port is not open";
-        return 0;
-    }
     DWORD got = 0;
     if (!ReadFile(static_cast<HANDLE>(handle_), buffer, static_cast<DWORD>(length), &got,
                   nullptr)) {
@@ -136,7 +130,5 @@ size_t SerialPort::read(uint8_t* buffer, size_t length) {
 }
 
 void SerialPort::flush() {
-    if (handle_) {
-        PurgeComm(static_cast<HANDLE>(handle_), PURGE_RXCLEAR | PURGE_TXCLEAR);
-    }
+    if (handle_) PurgeComm(static_cast<HANDLE>(handle_), PURGE_RXCLEAR | PURGE_TXCLEAR);
 }

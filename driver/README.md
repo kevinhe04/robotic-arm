@@ -38,17 +38,14 @@ is what this tool does.
 - **A 12 V power supply** into the adapter board. The servos draw far more
   current than USB can give; USB only carries the data.
 
-Plug the adapter in and it appears as a serial port. On macOS that is a
-`/dev/cu.usbmodem…` device — `ls /dev/cu.*` before and after plugging in to see
-which one. On Windows it is a COM port (Device Manager → Ports). You pass it to
-every command; the examples below use `$PORT`:
+Plug the adapter in and it appears as a serial port: a `/dev/cu.usbmodem…` device on
+macOS, a COM port on Windows. You normally don't need its name — every tool finds the
+adapter by itself when exactly one USB serial adapter is plugged in, and refuses (listing
+what it found) when there are none or several.
 
-```
-export PORT=/dev/cu.usbmodem1101    # yours will differ
-```
-
-Use the `cu.` device, not `tty.`: opening `tty.` waits for a carrier-detect
-signal the adapter never sends.
+To pick one yourself, put it first: `build/servo_tool /dev/cu.usbmodem1101 scan`. On
+macOS use the `cu.` device, not `tty.`: opening `tty.` waits for a carrier-detect signal
+the adapter never sends.
 
 ## Build
 
@@ -74,7 +71,7 @@ Connect **one servo at a time**. Two factory-fresh servos on the bus both
 answer to ID 1, and renaming would be a coin flip between them.
 
 ```
-build/servo_tool $PORT assign 4
+build/servo_tool assign 4
 ```
 
 The tool prompts you before each servo, scans the bus, confirms exactly one
@@ -84,7 +81,7 @@ mount them — base, shoulder, elbow, wrist — so the IDs match the joints.
 When it finishes, chain all four back together and confirm:
 
 ```
-build/servo_tool $PORT scan
+build/servo_tool scan
 ```
 
 You should see `found 4 servo(s): 1 2 3 4`.
@@ -92,32 +89,46 @@ You should see `found 4 servo(s): 1 2 3 4`.
 ## Other commands
 
 ```
-build/servo_tool $PORT scan                list every servo answering
-build/servo_tool $PORT ping 1              check one servo
-build/servo_tool $PORT setid 1 3           rename servo 1 to 3, no prompts
-build/servo_tool $PORT pos 3               read present position (0-4095)
+build/servo_tool scan                list every servo answering
+build/servo_tool ping 1              check one servo
+build/servo_tool setid 1 3           rename servo 1 to 3, no prompts
+build/servo_tool pos 3               read present position (0-4095)
 ```
 
 Add `--baud 115200` before the command if a servo is not on the factory
 1,000,000 baud.
 
-## First motion
+## Record and replay
 
-Once `scan` shows `1 2 3 4`, move one joint at a time before anything else:
+Teach the arm a motion by moving it by hand, then have it repeat it under power:
 
 ```
-scripts/first_motion.sh $PORT 4          step servo 4 by +100 counts (~9 degrees) and back
-scripts/first_motion.sh $PORT 4 -100     same, other direction
-scripts/torque_off.sh $PORT              all joints limp -- support the arm first
+build/servo_tool record --seconds 15   torque off; move the arm by hand for 15 s
+build/servo_tool replay                repeat it at the speed you moved it
+build/servo_tool replay --seconds 8    ...or make the motion take 8 s
+build/servo_tool replay --reverse      play it end to start
+build/servo_tool torque-off        all joints limp -- support the arm first
 ```
 
-The script caps speed, acceleration and torque, sets the goal to the present position
-*before* enabling torque (so the servo holds rather than jumping to a stale goal), and
-pauses for confirmation before every step. Start with the wrist (4), which carries the
-least load, and work inward to the base (1).
+`record` samples all four joints at up to 50 Hz into `recording.txt` (`--out` to change
+it); Ctrl+C ends it early and still saves. Start and finish in the same resting pose.
 
-These scripts use the raw `write` command and bypass the safety layer, which does not
-exist yet. They are for bench bring-up, not for anything that runs unattended.
+`replay` follows the recording's own timing in a 25 Hz loop, sending each joint the
+interpolated goal for "now" and checking where it actually is. It only goes where the
+recording went:
+
+- goals are clamped to each joint's recorded range
+- it refuses to start unless the arm is within ~13° of the first pose, then closes that
+  gap with a slow one-second approach
+- `--seconds` too short for the servos' speed cap is refused up front, with the shortest
+  value that would work
+- a recording that ends away from where it started is retraced back, so torque goes off
+  in the resting pose it began from
+- a joint that falls behind, a bus error or Ctrl+C makes the arm **hold** its pose rather
+  than go limp, because a limp shoulder drops the arm
+
+Both write goal positions directly and bypass the safety layer, which does not exist
+yet. They are bench tools, not for anything that runs unattended.
 
 ## How the protocol works
 
@@ -142,15 +153,35 @@ changes its ID, address 56 reads back its position, and so on. Addresses below
 40 are EEPROM (survive power-off) and are protected by a lock at address 55 —
 so changing an ID is three steps: unlock, write the new ID, lock again.
 
+## Tests
+
+```
+./build.sh test
+```
+
+No port and no servo needed. `Bus` depends on `Transport`, not on `SerialPort`, so the
+tests hand it a fake that records every packet and replays scripted servo replies.
+
+The bottom of `test_bus.cpp` holds tests marked `doctest::should_fail`: behaviour the
+driver should have and does not yet. They count as passing while they fail. When a fix
+makes one pass, the run goes red with "should have failed but didn't" — delete the
+marker and it stays green from then on.
+
 ## Files
 
 | File | What it does |
 | --- | --- |
-| `src/serial_port.h` | Serial port interface: open, read with timeout, write, flush |
+| `src/transport.h` | The bytes-in/bytes-out interface `Bus` depends on |
+| `src/serial_port.h` | Serial port interface, plus finding the adapter automatically |
 | `src/serial_port_posix.cpp` | macOS / Linux implementation, on termios |
 | `src/serial_port_win32.cpp` | Windows implementation, on the Win32 COM API |
 | `src/sts3215.h/.cpp` | Builds and parses servo packets; ping, read, write, set ID |
-| `src/main.cpp` | The command line interface |
+| `src/main.cpp` | `servo_tool`: IDs, register reads/writes, `torque-off`, dispatch |
+| `src/recording.h/.cpp` | A recorded motion: file format, interpolation, reverse/retrace, timing |
+| `src/record_replay.cpp` | The `record` and `replay` commands |
+| `tests/fake_serial_port.h` | A fake `Transport` that scripts servo replies, with or without echo |
+| `tests/test_bus.cpp` | Bus behaviour against both adapter styles, then the hardening backlog |
+| `tests/test_tools.cpp` | The replay plan, the recording file format, port auto-detect |
 
 Everything above the serial port is platform-independent; the build picks one
 `serial_port_*.cpp`. Keeping the OS behind that one interface is deliberate: if the

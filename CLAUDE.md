@@ -92,6 +92,17 @@ listed here so they are not silently "helpfully" fixed:
 - `set_id` leaves EEPROM unlocked if the ID write fails. RAII: re-lock from a destructor.
 - The retry loop re-reads the port but never re-sends, so a corrupted transmit is unrecoverable.
 - `scan()` pings all 254 IDs on a 4-servo arm.
+- Found by the test harness: a stray `0xFF` before a reply header makes the frame search `break`
+  instead of `continue`, losing the real reply one byte later.
+- Found by the test harness: on an echoing adapter, silence is reported as "malformed reply"
+  because the buffer holds the echo.
+
+Each of these has a `should_fail` test at the bottom of `driver/tests/test_bus.cpp`.
+
+**`record` / `replay` were written by Claude at the owner's request**, as an explicit exception to
+the rule above -- he chose to review them rather than write them. They are bench tools: `replay`
+writes goal positions directly, because no safety layer exists yet. When the safety layer lands,
+move `replay` onto it; do not treat `record_replay.cpp` as the model for how motion code should look.
 
 ## Hardware
 
@@ -131,13 +142,17 @@ touches the bus:
 ```
 driver/         # C++ — the robot
   src/
-    sts3215.*     # packet protocol + bus transport
-    serial_port.h         # serial port interface; the ONLY place the OS leaks in -- keep it so
-    serial_port_posix.cpp # macOS / Linux, termios. 1 Mbaud on macOS needs IOSSIOSPEED
-    serial_port_win32.cpp # Windows. The only file that includes windows.h
-    main.cpp      # servo_tool CLI
-                  # kinematics, motion, safety, calibration, apps land here
-  scripts/        # bench bring-up shell scripts (first_motion.sh, torque_off.sh)
+    sts3215.*             # packet protocol + bus transport
+    transport.h           # bytes in/out interface Bus depends on (SerialPort, test fake)
+    serial_port.h         # serial port + adapter auto-detect; the only place the OS leaks in
+    serial_port_posix.cpp # macOS / Linux. 1 Mbaud on macOS needs IOSSIOSPEED
+    serial_port_win32.cpp # Windows. The only file that includes windows.h -- keep it so
+    recording.*           # recorded motion: file format, interpolation, reverse/retrace, timing
+    record_replay.cpp     # `servo_tool record` / `servo_tool replay` bench tools
+    main.cpp              # servo_tool CLI
+                          # kinematics, motion, safety, calibration, apps land here
+  tests/          # doctest unit tests against a fake serial port -- no hardware needed
+  third_party/    # doctest.h, vendored single header
   CMakeLists.txt, build.sh (macOS), build.bat (Windows)
 perception/     # Python — the VLM call, and nothing else
 configs/        # servos.yaml: ids, limits, calibration output
@@ -156,7 +171,7 @@ yaml-cpp, nlohmann/json, or a hand-rolled parser are all defensible. Ask before 
 
 ```
 cd driver && ./build.sh          # Apple clang; or cmake -S . -B build && cmake --build build
-driver/build/servo_tool /dev/cu.usbmodem5B8E1134991 scan
+driver/build/servo_tool scan       # port auto-detected when one USB adapter is plugged in
 ```
 
 Development machine is a MacBook: Apple clang 17, **no CMake installed** — use `build.sh`.
@@ -168,12 +183,17 @@ code in it, so this is not blocking anything.
 
 ## Testing
 
-**There are no tests.** This is the first thing to fix in `driver/`, before more features land.
-`Bus` already takes `SerialPort&` by reference, so a fake port behind that interface is the whole
-job. doctest or Catch2, single header.
+**Tests exist; the driver hardening they describe is not done yet.** `driver/tests/`, doctest,
+run with `cd driver && ./build.sh test` (or `ctest` after a CMake build). `Bus` talks through the
+`Transport` interface (`src/transport.h`); `SerialPort` is the real implementation and
+`tests/fake_serial_port.h` is a fake that scripts servo replies, with or without adapter echo.
 
-Cover both adapter styles from the start: some USB-TTL adapters echo transmitted bytes back to the
-host and some do not, and a driver that assumes one silently fails on the other.
+- `test_bus.cpp` pins down current bus behaviour, every case against both adapter styles. Its
+  bottom section is the hardening to-do list as `doctest::should_fail` tests: they pass *because*
+  they fail, and when a fix makes one pass the marker comes off. The skipped placeholders need
+  an API he has not designed yet -- do not design it for him, and do not "fix" a should_fail
+  test by weakening its assertion.
+- `test_tools.cpp` covers the recording/replay plan and serial-port auto-detect.
 
 Once kinematics lands, assert `FK(IK(pose)) ≈ pose` over randomized reachable poses, and assert IK
 rejects out-of-envelope targets rather than returning something plausible-looking.
